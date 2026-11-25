@@ -88,3 +88,7 @@ The details are in the code: `bridge/trailcam_bridge/camera.py` (with markers fo
 ## Disclaimer
 
 An independent hobby project, not affiliated with or endorsed by Denver or the makers of TrailCam Go. It talks to a camera you own, on your own network. Use at your own risk.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
