@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block content %}
+{% if request.query_params.get('verwijderd') %}<p class="notice toast" role="status">{{ _('Clip verwijderd.') }}</p>{% endif %}
+{% macro href(soort_, status_, pagina_=None) -%}
+{%- set q = [] -%}
+{%- if soort_ %}{% set _x = q.append('soort=' ~ (soort_ | urlencode)) %}{% endif -%}
+{%- if status_ %}{% set _x = q.append('status=' ~ status_) %}{% endif -%}
+{%- if pagina_ %}{% set _x = q.append('pagina=' ~ pagina_) %}{% endif -%}
+/{{ ('?' ~ (q | join('&'))) if q }}
+{%- endmacro %}
+<div class="filters">
+  <nav class="chips" aria-label="{{ _('Wat staat erop') }}">
+    <a class="chip {{ 'on' if not soort }}" href="{{ href(None, status_filter) }}"{{ ' aria-current=true' if not soort }}>{{ _('Alle dieren') }} <b>{{ animals_total }}</b></a>
+    {% for label, n in labels %}
+    <a class="chip {{ 'on' if soort == label }}" href="{{ href(label, status_filter) }}"{{ ' aria-current=true' if soort == label }}>{{ label | species }} <b>{{ n }}</b></a>
+    {% endfor %}
+    {% if empty_total or soort == 'leeg' %}<a class="chip quiet {{ 'on' if soort == 'leeg' }}" href="{{ href('leeg', status_filter) }}"{{ ' aria-current=true' if soort == 'leeg' }}>{{ _('Zonder dier') }} <b>{{ empty_total }}</b></a>{% endif %}
+  </nav>
+  <div class="segmented status" role="group" aria-label="{{ _('Beoordeling') }}">
+    <a href="{{ href(soort, None) }}" class="{{ 'on' if not status_filter }}"{{ ' aria-current=true' if not status_filter }}>{{ _('Alles') }} <b>{{ all_count }}</b></a>
+    <a href="{{ href(soort, 'open') }}" class="{{ 'on' if status_filter == 'open' }}"{{ ' aria-current=true' if status_filter == 'open' }}>{{ _('Te beoordelen') }} <b>{{ state_counts.open }}</b></a>
+    <a href="{{ href(soort, 'bevestigd') }}" class="{{ 'on' if status_filter == 'bevestigd' }}"{{ ' aria-current=true' if status_filter == 'bevestigd' }}>{{ _('Bevestigd') }} <b>{{ state_counts.bevestigd }}</b></a>
+  </div>
+</div>
+
+{% if not groups %}
+<div class="empty">
+  {% if status_filter == 'bevestigd' %}
+  <h2>{{ _('Nog niets bevestigd') }}</h2>
+  <p>{{ _('Druk op een clip op Klopt, of vul zelf in wat het is.') }}</p>
+  {% elif status_filter == 'open' or soort %}
+  <h2>{{ _('Niets te zien met deze filters') }}</h2>
+  <p><a href="/">{{ _('Alle clips tonen') }}</a></p>
+  {% else %}
+  <h2>{{ _('Nog niks gezien') }}</h2>
+  <p>{{ _("Zet foto's of video's in de inbox-map, of stuur ze naar {api}.", api='<code>POST /api/ingest</code>' | safe) }}</p>
+  {% endif %}
+</div>
+{% endif %}
+
+{% for day, clips in groups %}
+<h2 class="day">{{ day }}</h2>
+<section class="grid">
+  {% for c in clips %}
+  <a class="card {{ 'blank' if c.label == 'leeg' }}" href="/clip/{{ c.id }}">
+    <div class="thumb">
+      {% if c.thumb %}<img src="/thumbs/{{ c.thumb }}" alt="{{ clip_name(c) or _('Clip') }}" loading="lazy">
+      {% else %}<div class="ph"></div>{% endif %}
+      {% if c.kind == 'video' %}<span class="badge play" title="{{ _('video') }}">&#9654;</span>{% endif %}
+      {% if c.status == 'pending' %}<span class="badge busy">{{ _('bezig') }}</span>
+      {% elif c.status == 'failed' %}<span class="badge err">{{ _('mislukt') }}</span>{% endif %}
+    </div>
+    <div class="meta">
+      <span class="name">{{ clip_name(c) or '...' }}{% if c.review == 'bevestigd' %} <i title="{{ _('bevestigd') }}">&#10003;</i>{% elif c.review == 'twijfel' %} <i class="doubt" title="{{ _('twijfel') }}">?</i>{% endif %}</span>
+      <span class="sub">{{ c.captured_at | time }}{% if c.score and not c.manual_label and c.label != 'leeg' %} &middot; <span class="{{ 'low' if c.score < min_score }}">{{ c.score | pct }}</span>{% endif %}</span>
+    </div>
+  </a>
+  {% endfor %}
+</section>
+{% endfor %}
+
+{% if pagina > 1 or has_next %}
+<nav class="pager">
+  {% if pagina > 1 %}<a href="{{ href(soort, status_filter, pagina - 1) }}">&larr; {{ _('Nieuwer') }}</a>{% else %}<span></span>{% endif %}
+  {% if has_next %}<a href="{{ href(soort, status_filter, pagina + 1) }}">{{ _('Ouder') }} &rarr;</a>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

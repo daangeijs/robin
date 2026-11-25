@@ -1,0 +1,22 @@
+# Database, thumbnails, inbox and (by default) the originals.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: wildcam-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 20Gi
+  # storageClassName: local-path   # k3s default
+---
+# SpeciesNet model cache (downloaded on first start, about 250 MB).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: wildcam-models
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi

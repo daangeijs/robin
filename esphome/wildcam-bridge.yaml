@@ -1,0 +1,328 @@
+# Wildcam bridge: ESP32-WROOM on the USB port of a Raspberry Pi.
+#
+# - Bluetooth proxy for Home Assistant, and camera presence/RSSI.
+# - camlink: on request of the Pi (serial frames over USB, docs/serial-link.md)
+#   it wakes the Denver WSW-8120 over BLE, joins the camera hotspot and passes
+#   UDP packets between camera and Pi. The Pi speaks the camera protocol.
+# - The status and settings the Pi read during its last session show up here
+#   as sensors; they are kept in flash, so they survive a reboot.
+#
+# UART0 (the USB port) belongs to the Pi, so the logger does not use it: read
+# logs with `esphome logs` over wifi. Flash over USB from the Pi with esptool,
+# or over the air once it runs.
+
+substitutions:
+  name: wildcam-bridge
+  friendly_name: Wildcam bridge
+  # BLE MAC of the camera (advertises as TC100_1234).
+  camera_mac: "AA:BB:CC:DD:12:34"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  comment: Bluetooth proxy + camera link for the Denver WSW-8120 trail camera
+
+esp32:
+  board: esp32dev # generic ESP32-WROOM-32 DevKit
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      # Room for bursts from the camera while the serial line catches up.
+      CONFIG_LWIP_UDP_RECVMBOX_SIZE: "32"
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+logger:
+  baud_rate: 0 # UART0 is the link to the Pi
+  level: DEBUG
+  logs:
+    esp32_ble_tracker: INFO
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+  reboot_timeout: 0s # a camera session takes the device off the network for a while
+
+ota:
+  - platform: esphome
+    encryption: {} # reuses the api encryption key
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  reboot_timeout: 0s # camlink switches networks on purpose
+  ap:
+    ssid: "${name} fallback"
+    password: !secret fallback_password
+
+captive_portal:
+
+web_server:
+  port: 80
+  version: 3
+  ota: false # firmware updates only via the encrypted esphome OTA
+  auth:
+    type: digest
+    username: !secret web_username
+    password: !secret web_password
+
+uart:
+  id: pi
+  tx_pin: GPIO1
+  rx_pin: GPIO3
+  baud_rate: 921600
+  rx_buffer_size: 16384
+
+esp32_ble:
+  max_connections: 4 # 3 proxy slots + the camera client
+
+esp32_ble_tracker:
+  # Listen for the camera 5 s each minute, passively (no scan requests sent). Scanning all the
+  # time made radio bursts that the USB headset on the same Pi picked up as ticks. Sessions
+  # connect directly by MAC and do not need the scanner.
+  scan_parameters:
+    continuous: false
+    active: false
+    duration: 5s
+    interval: 320ms
+    window: 300ms # longer windows starve wifi on the shared radio
+
+interval:
+  - interval: 60s
+    then:
+      - esp32_ble_tracker.start_scan:
+
+bluetooth_proxy:
+  active: true
+
+ble_client:
+  - mac_address: ${camera_mac}
+    id: camera
+    auto_connect: false
+
+camlink:
+  id: cam_link
+  uart_id: pi
+  ble_client_id: camera
+  home_ssid: !secret wifi_ssid
+  home_password: !secret wifi_password
+  session_timeout: 15min
+
+button:
+  - platform: restart
+    name: Herstarten
+
+binary_sensor:
+  - platform: ble_presence
+    mac_address: ${camera_mac}
+    name: Camera in bereik
+    timeout: 5min
+  - platform: template
+    name: Camera laadt
+    icon: mdi:battery-charging
+    lambda: 'auto v = id(cam_link).status_flag("charging"); if (v < 0) return {}; return v == 1;'
+  - platform: template
+    name: Camera zonnepaneel laadt
+    icon: mdi:solar-power
+    lambda: 'auto v = id(cam_link).status_flag("solar"); if (v < 0) return {}; return v == 1;'
+  - platform: template
+    name: Camera geluid opnemen
+    icon: mdi:microphone
+    entity_category: diagnostic
+    lambda: 'auto v = id(cam_link).status_flag("audio"); if (v < 0) return {}; return v == 1;'
+  - platform: template
+    name: Camera zijsensoren
+    icon: mdi:motion-sensor
+    entity_category: diagnostic
+    lambda: 'auto v = id(cam_link).status_flag("side_pir"); if (v < 0) return {}; return v == 1;'
+  - platform: template
+    name: Camera bewegingsfilter
+    icon: mdi:filter
+    entity_category: diagnostic
+    lambda: 'auto v = id(cam_link).status_flag("motion_filter"); if (v < 0) return {}; return v == 1;'
+  - platform: template
+    name: Camera tijdstempel
+    icon: mdi:calendar-clock
+    entity_category: diagnostic
+    lambda: 'auto v = id(cam_link).status_flag("date_stamp"); if (v < 0) return {}; return v == 1;'
+  - platform: template
+    name: Camera loop-opname
+    icon: mdi:repeat
+    entity_category: diagnostic
+    lambda: 'auto v = id(cam_link).status_flag("loop_record"); if (v < 0) return {}; return v == 1;'
+  - platform: template
+    name: Camera led
+    icon: mdi:led-on
+    entity_category: diagnostic
+    lambda: 'auto v = id(cam_link).status_flag("led"); if (v < 0) return {}; return v == 1;'
+
+sensor:
+  - platform: ble_rssi
+    mac_address: ${camera_mac}
+    name: Camera BLE signaal
+    on_value:
+      - lambda: 'id(cam_link).set_camera_rssi(x);'
+  - platform: wifi_signal
+    name: Wifi signaal
+    update_interval: 60s
+  - platform: uptime
+    name: Uptime
+
+  # Last known camera status, from the Pi's last session.
+  - platform: template
+    name: Camera batterij
+    unit_of_measurement: "%"
+    device_class: battery
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: 'return id(cam_link).status_number("battery");'
+  - platform: template
+    name: Camera temperatuur
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: 'return id(cam_link).status_number("temperature");'
+  - platform: template
+    name: Camera SD vrij
+    unit_of_measurement: MB
+    icon: mdi:sd
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: 'return id(cam_link).status_number("sd_free_mb");'
+  - platform: template
+    name: Camera SD totaal
+    unit_of_measurement: MB
+    icon: mdi:sd
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: 'return id(cam_link).status_number("sd_total_mb");'
+  - platform: template
+    name: Clips op camera
+    icon: mdi:filmstrip
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: 'return id(cam_link).status_number("clips");'
+  - platform: template
+    name: Laatst opgehaald
+    icon: mdi:download
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: 'return id(cam_link).status_number("fetched");'
+  - platform: template
+    name: Laatste sessie
+    device_class: timestamp
+    update_interval: 30s
+    lambda: 'return id(cam_link).status_number("time");'
+
+  # Camera settings as last read (read-only for now).
+  - platform: template
+    name: Camera cliplengte
+    unit_of_measurement: s
+    icon: mdi:timer-outline
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: 'return id(cam_link).status_number("clip_length");'
+  - platform: template
+    name: Camera detectievertraging
+    unit_of_measurement: s
+    icon: mdi:timer-sand
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: 'return id(cam_link).status_number("detection_delay");'
+  - platform: template
+    name: Camera timelapse-interval
+    unit_of_measurement: s
+    icon: mdi:timelapse
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: 'return id(cam_link).status_number("timelapse_interval");'
+  - platform: template
+    name: Camera PIR-gevoeligheid
+    icon: mdi:motion-sensor
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: 'return id(cam_link).status_number("pir_sensitivity");'
+  - platform: template
+    name: Camera opnamesoort
+    icon: mdi:camera-switch
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: 'return id(cam_link).status_number("shoot_mode");'
+  - platform: template
+    name: Camera videoresolutie
+    icon: mdi:video-high-definition
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: 'return id(cam_link).status_number("video_resolution");'
+  - platform: template
+    name: Camera fotoresolutie
+    icon: mdi:image-size-select-large
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: 'return id(cam_link).status_number("photo_resolution");'
+  - platform: template
+    name: Camera nachtzicht bereik
+    icon: mdi:weather-night
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: 'return id(cam_link).status_number("ir_range");'
+  - platform: template
+    name: Camera piepvolume
+    icon: mdi:volume-high
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: 'return id(cam_link).status_number("beep_volume");'
+
+text_sensor:
+  - platform: template
+    name: Camera modus
+    icon: mdi:cctv
+    update_interval: 30s
+    lambda: 'return id(cam_link).status_text("mode");'
+  - platform: template
+    name: Camera werktijden
+    icon: mdi:clock-outline
+    entity_category: diagnostic
+    update_interval: 30s
+    lambda: 'return id(cam_link).status_text("schedule");'
+  - platform: template
+    name: Camera naam
+    icon: mdi:label-outline
+    entity_category: diagnostic
+    update_interval: 30s
+    lambda: 'return id(cam_link).status_text("camera_name");'
+  - platform: template
+    name: Camera firmware
+    icon: mdi:chip
+    entity_category: diagnostic
+    update_interval: 30s
+    lambda: 'return id(cam_link).status_text("firmware");'
+  - platform: template
+    name: Laatste sessie uitkomst
+    icon: mdi:history
+    update_interval: 30s
+    lambda: 'return id(cam_link).status_text("result");'
+  - platform: template
+    name: Camlink status
+    icon: mdi:transit-connection-variant
+    entity_category: diagnostic
+    update_interval: 10s
+    lambda: 'return id(cam_link).state_text();'

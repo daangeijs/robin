@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: wildcam
+resources:
+  - namespace.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+configMapGenerator:
+  - name: wildcam-config
+    literals:
+      - WILDCAM_CLASSIFIER=speciesnet
+      - WILDCAM_COUNTRY=NLD
+      - WILDCAM_MIN_SCORE=0.5
+      - WILDCAM_VIDEO_FRAMES=6
+      - WILDCAM_NOTIFY_SPECIES=vos,das,steenmarter,boommarter,hermelijn,wezel
+      - WILDCAM_NOTIFY_NEW_SPECIES=true
+      - WILDCAM_BASE_URL=https://wildcam.example.lan # TODO: your hostname
+# Create the secret yourself (not committed):
+#   kubectl -n wildcam create secret generic wildcam-secrets \
+#     --from-literal=WILDCAM_INGEST_TOKEN=$(openssl rand -hex 24) \
+#     --from-literal=WILDCAM_HA_WEBHOOK_URL=http://homeassistant.local:8123/api/webhook/wildcam
+images:
+  - name: wildcam
+    newName: ghcr.io/CHANGE_ME/wildcam # TODO: your registry
+    newTag: "0.1.0"

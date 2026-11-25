@@ -1,0 +1,586 @@
+{% extends "base.html" %}
+{% block title %}{{ clip_name(clip) or _('Clip') }} - {{ app_name }}{% endblock %}
+{% macro boxes(detections) %}
+  {% for d in detections %}{% if d.bbox %}
+  <div class="box" style="left:{{ d.bbox[0]*100 }}%;top:{{ d.bbox[1]*100 }}%;width:{{ d.bbox[2]*100 }}%;height:{{ d.bbox[3]*100 }}%"><span>{{ d.label | animal | cap }} {{ d.conf | pct }}</span></div>
+  {% endif %}{% endfor %}
+{% endmacro %}
+{% macro icon(name) %}
+  {% if name == 'check' %}<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8"/></svg>
+  {% elif name == 'doubt' %}<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.6 6a2.5 2.5 0 1 1 3.6 2.2c-.8.4-1.2.9-1.2 1.8"/><path d="M8 12.6v.1"/></svg>
+  {% elif name == 'plus' %}<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+  {% elif name == 'play' %}<svg viewBox="0 0 16 16" aria-hidden="true" class="solid"><path d="M4.5 2.8v10.4L13 8z"/></svg>
+  {% elif name == 'pause' %}<svg viewBox="0 0 16 16" aria-hidden="true" class="solid"><path d="M4 3h3v10H4zM9 3h3v10H9z"/></svg>
+  {% elif name == 'sound' %}<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 6.2h2.3L8 3.5v9L4.8 9.8H2.5z"/><path d="M10.6 5.6a3.4 3.4 0 0 1 0 4.8M12.4 3.8a6 6 0 0 1 0 8.4"/></svg>
+  {% elif name == 'muted' %}<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 6.2h2.3L8 3.5v9L4.8 9.8H2.5z"/><path d="M10.8 6.2l3.4 3.6M14.2 6.2l-3.4 3.6"/></svg>
+  {% elif name == 'full' %}<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.8 6V2.8H6M10 2.8h3.2V6M13.2 10v3.2H10M6 13.2H2.8V10"/></svg>
+  {% elif name == 'stills' %}<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3.5" width="12" height="9" rx="1.5"/><path d="M6 3.5v9M10 3.5v9"/></svg>
+  {% elif name == 'minus' %}<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10"/></svg>
+  {% elif name == 'chevron' %}<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"/></svg>
+  {% elif name == 'close' %}<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+  {% endif %}
+{% endmacro %}
+{% macro stamp() %}{% set b = banner() %}{% set start = clip.captured_at[:19] %}
+<div class="stamp" aria-hidden="true">
+  <span class="stamp-left">{{ camera_name(clip) if b.camera }}</span>
+  <span class="stamp-mid">
+    {% if b.date %}<span data-stamp-date>{{ start[8:10] }}-{{ start[5:7] }}-{{ start[:4] }}</span>{% endif %}
+    {% if b.time %}<span data-stamp-time{% if b.ticking and clip.kind == 'video' %} data-start="{{ start }}"{% endif %}>{{ start[11:19] }}</span>{% endif %}
+  </span>
+  <span class="stamp-right">
+    {% for kind, value in banner_right(clip) %}{% if kind == 'icon' %}<svg viewBox="-1.1 -1.1 2.2 2.2">{{ value | safe }}</svg>{% else %}<span>{{ value }}</span>{% endif %}{% endfor %}
+  </span>
+</div>{% endmacro %}
+{% block content %}
+<a class="back" href="javascript:history.back()">&larr; {{ _('Terug') }}</a>
+<section class="detail">
+  <div class="viewer">
+    {% if clip.kind == 'video' %}
+      <div class="player" id="player">
+        <div class="screen">
+          <div class="pic">
+            <video id="video" src="/media/{{ clip.media_path }}" controls playsinline preload="metadata" poster="{{ '/thumbs/' ~ clip.thumb if clip.thumb }}"></video>
+            {{ stamp() }}
+          </div>
+        </div>
+        <div class="deck" id="deck" hidden>
+          <div class="timeline" id="timeline">
+            <div class="track" id="track" tabindex="0" role="slider" aria-label="{{ _('Tijdlijn') }}" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-valuetext="0:00">
+              <canvas class="film" id="film"></canvas>
+              <div class="played" id="played"></div>
+              <div class="peek-line" id="peek-line" hidden></div>
+            </div>
+            <div class="pins" id="pins"></div>
+            <div class="playhead" id="playhead"></div>
+            <div class="peek" id="peek" hidden>
+              <canvas id="peek-frame" width="192" height="108"></canvas>
+              <b id="peek-time">0:00</b>
+            </div>
+          </div>
+          <div class="controls">
+            <button type="button" class="ctl" id="play" aria-label="{{ _('Afspelen') }}"><span class="when-paused">{{ icon('play') }}</span><span class="when-playing">{{ icon('pause') }}</span></button>
+            <span class="clock"><b id="clock-now">0:00</b> / <span id="clock-end">0:00</span></span>
+            <button type="button" class="ctl mark" id="still-add" hidden><span class="when-free">{{ icon('plus') }}</span><span class="when-taken">{{ icon('minus') }}</span>{% set sb = still_button[lang()]["add"] %}<span class="text"><span id="still-add-a">{{ sb[0] }}</span><span class="long" id="still-add-text">{{ sb[1] }}</span></span><kbd>S</kbd></button>
+            <span class="gap"></span>
+            <button type="button" class="ctl toggle" id="edit" aria-expanded="false" aria-controls="stills">{{ icon('stills') }}<span class="text">{{ _('Detectie') }}</span><span class="n" id="still-count">{{ clip.votes | length }}</span><span class="chev">{{ icon('chevron') }}</span></button>
+            <button type="button" class="ctl" id="mute" aria-label="{{ _('Geluid uit') }}"><span class="when-sound">{{ icon('sound') }}</span><span class="when-muted">{{ icon('muted') }}</span></button>
+            <button type="button" class="ctl" id="full" aria-label="{{ _('Volledig scherm') }}">{{ icon('full') }}</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="stills" id="stills" data-clip="{{ clip.id }}" data-max="{{ max_stills }}" data-film="/clip/{{ clip.id }}/film.jpg" data-film-frames="{{ film_frames }}" hidden>
+        <p class="sub" id="stills-hint" role="status">{% if clip.status == 'pending' %}{{ _('Het model bekijkt de beelden…') }}{% else %}{{ _('Sleep de lijn naar een moment waarop het dier goed in beeld is en voeg een beeld toe.') }}{% endif %}</p>
+        <ol class="strip" id="strip">
+          {% for v in clip.votes %}
+          <li class="still" data-t="{{ v.t }}">
+            <button type="button" class="seek" title="{{ _('Ga naar {t}', t=v.t | clock) }}">
+              <img src="/thumbs/{{ v.thumb }}?v={{ clip.score }}" alt="" loading="lazy">
+              <span class="t">{{ v.t | clock }}</span>
+            </button>
+            {% for model in voting %}
+            {% set r = v.by.get(model) %}
+            {% set problem = (v.errors or {}).get(model) %}
+            <span class="verdict">
+              {% if voting | length > 1 %}<span class="src">{{ catalogue[model].label }}</span>{% endif %}
+              {% if r and r.name in ('blank', 'no cv result') %}<span class="who muted">{{ r.name | animal | cap }}</span>
+              {% elif r and r.name %}<span class="who">{{ r.name | animal | cap }}</span><span class="pct">{{ r.score | pct }}</span>
+              {% elif problem %}<span class="who failed" title="{{ problem | msg }}">{{ _('mislukt') }}</span>
+              {% else %}<span class="who muted">{{ _('nog niet bekeken') }}</span>{% endif %}
+            </span>
+            {% endfor %}
+            <button type="button" class="drop" aria-label="{{ _('Beeld op {t} weghalen', t=v.t | clock) }}">{{ icon('close') }}</button>
+          </li>
+          {% endfor %}
+        </ol>
+        <div class="stills-actions">
+          {% if clip.status == 'done' and clip.votes | selectattr('errors') | list %}<form method="post" action="/clip/{{ clip.id }}/opnieuw"><input type="hidden" name="mislukt" value="1"><button class="ghost">{{ _('Mislukte opnieuw') }}</button></form>{% endif %}
+          <form method="post" action="/clip/{{ clip.id }}/opnieuw"{% if clip.kind == 'video' %} data-confirm="{{ _('Clip opnieuw analyseren?') }}" data-confirm-body="{{ _('Alle modellen lezen alle beelden van deze clip opnieuw.') }}" data-confirm-ok="{{ _('Opnieuw analyseren') }}"{% endif %}><button class="ghost">{{ _('Analyseer opnieuw') }}</button></form>
+        </div>
+      </div>
+    {% else %}
+      <div class="frame">
+        <img src="/media/{{ clip.media_path }}" alt="{{ clip_name(clip) }}">
+        {{ stamp() }}
+        {{ boxes(clip.detections) }}
+      </div>
+    {% endif %}
+  </div>
+
+  <aside class="panel">
+    <p class="when">{{ clip.captured_at | day }} &middot; {{ clip.captured_at | time }}</p>
+    <h1>{{ clip_name(clip) or _('Nog niet bepaald') }}</h1>
+    {% if clip.manual_label %}
+      <p class="sub">{% if clip.name_nl %}{{ _('Zelf ingevuld. Het model zei {name}', name=_('leeg') if clip.is_blank else (clip.name_nl if lang() == 'nl' else clip.common_name | animal)) }}{% if not clip.is_blank %} ({{ clip.score | pct }}){% endif %}{% else %}{{ _('Zelf ingevuld') }}{% endif %}</p>
+    {% elif clip.status == 'done' and not clip.is_blank and clip.score %}
+      <div class="meter {{ 'low' if clip.score < min_score }}"><span style="width:{{ clip.score * 100 }}%"></span></div>
+      <p class="sub">{{ _('{pct} zeker', pct=clip.score | pct) }}{% if clip.score < min_score %}, {{ _('onzeker') }}{% endif %}{% if clip.taxon | sci %} &middot; <i>{{ clip.taxon | sci }}</i>{% endif %}</p>
+    {% elif clip.status == 'pending' %}
+      <p class="sub">{{ _('In de wachtrij voor determinatie') }}</p>
+    {% elif clip.status == 'failed' %}
+      <p class="sub err">{{ _('Mislukt: {reason}', reason=clip.error | msg) }}</p>
+    {% endif %}
+
+    {% set wrong = clip.manual_label or clip.review == 'twijfel' %}
+    {% set locked = clip.manual_label or clip.review == 'bevestigd' %}
+    {% if locked %}
+    <div class="locked">
+      <span>{{ icon('check') }}{{ _('Zelf ingevuld') if clip.manual_label else _('Goedgekeurd') }}</span>
+      <button type="button" class="ghost pen" id="unlock" aria-expanded="false" aria-controls="verdict-edit" title="{{ _('Aanpassen') }}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 2.8l2.7 2.7-7.6 7.6-3.3.6.6-3.3z"/><path d="M9.2 4.1l2.7 2.7"/></svg>{{ _('Aanpassen') }}</button>
+    </div>
+    {% endif %}
+    <div class="verdict-edit" id="verdict-edit"{{ ' hidden' if locked }}>
+    {% if clip.status == 'done' %}
+    <div class="judge" role="group" aria-label="{{ _('Beoordeling') }}">
+      <form method="post" action="/clip/{{ clip.id }}/review"><input type="hidden" name="review" value="{{ '' if clip.review == 'bevestigd' else 'bevestigd' }}"><button class="ghost {{ 'on ok' if clip.review == 'bevestigd' and not clip.manual_label }}" aria-pressed="{{ 'true' if clip.review == 'bevestigd' and not clip.manual_label else 'false' }}">{{ icon('check') }}{{ _('Klopt') }}</button></form>
+      <button type="button" class="ghost {{ 'on no' if wrong }}" id="wrong" aria-expanded="{{ 'true' if wrong or clip.status != 'done' else 'false' }}" aria-controls="own">{{ icon('close') }}{{ _('Nee') }}</button>
+    </div>
+    {% endif %}
+
+    {% if clip.top | length > 1 %}
+    <h2>{{ _('Detecties') }}</h2>
+    <ul class="alts">
+      {% for name, s in clip.top %}<li><span>{{ name | animal | cap }}</span><span>{{ s | pct }}</span></li>{% endfor %}
+    </ul>
+    {% endif %}
+
+    <div class="own" id="own"{{ ' hidden' if clip.status == 'done' and not wrong }}>
+      <h2>{{ _('Wat is het dan?') }}</h2>
+      <form method="post" action="/clip/{{ clip.id }}/label" class="fix">
+      <label class="sr" for="label">{{ _('Soort') }}</label>
+      <input id="label" name="label" list="soorten" placeholder="{{ _('soort, bijv. vos') }}" value="{{ (clip.manual_label | species if lang() == 'en' else clip.manual_label) or '' }}" autocomplete="off">
+      <datalist id="soorten">{% for c in choices %}<option value="{{ c }}">{% endfor %}</datalist>
+      <button>{{ _('Opslaan') }}</button>
+      </form>
+      <div class="quick">
+      {% if clip.label != 'leeg' %}<form method="post" action="/clip/{{ clip.id }}/label"><input type="hidden" name="label" value="leeg"><button class="ghost">{{ _('Geen dier te zien') }}</button></form>{% endif %}
+      {% if clip.manual_label %}<form method="post" action="/clip/{{ clip.id }}/label"><input type="hidden" name="label" value=""><button class="ghost">{{ _('Model volgen') }}</button></form>{% endif %}
+      </div>
+    </div>
+    </div>
+    {% if clip.kind != 'video' %}<div class="quick"><form method="post" action="/clip/{{ clip.id }}/opnieuw"{% if clip.kind == 'video' %} data-confirm="{{ _('Clip opnieuw analyseren?') }}" data-confirm-body="{{ _('Alle modellen lezen alle stills van deze clip opnieuw.') }}" data-confirm-ok="{{ _('Opnieuw analyseren') }}"{% endif %}><button class="ghost">{{ _('Analyseer opnieuw') }}</button></form></div>{% endif %}
+    <script>
+    (() => {
+      // The bar's clock runs with the video: the moment of capture plus how far the video is.
+      const t = document.querySelector('[data-stamp-time][data-start]'), v = document.getElementById('video');
+      if (!t || !v) return;
+      const start = new Date(t.dataset.start), d = document.querySelector('[data-stamp-date]');
+      const two = (n) => String(n).padStart(2, '0');
+      v.addEventListener('timeupdate', () => {
+        const now = new Date(start.getTime() + Math.floor(v.currentTime) * 1000);
+        t.textContent = `${two(now.getHours())}:${two(now.getMinutes())}:${two(now.getSeconds())}`;
+        if (d) d.textContent = `${two(now.getDate())}-${two(now.getMonth() + 1)}-${now.getFullYear()}`;
+      });
+    })();
+    </script>
+    <script>
+    (() => {
+      const unlock = document.getElementById('unlock');
+      if (unlock) unlock.addEventListener('click', () => {
+        const box = document.getElementById('verdict-edit');
+        box.hidden = !box.hidden;
+        unlock.setAttribute('aria-expanded', !box.hidden);
+      });
+      const b = document.getElementById('wrong'), own = document.getElementById('own');
+      if (!b) return;
+      b.addEventListener('click', () => {
+        const open = own.hidden;
+        own.hidden = !open;
+        b.setAttribute('aria-expanded', open);
+        b.classList.toggle('on', open); b.classList.toggle('no', open);
+        if (open) document.getElementById('label').focus();
+      });
+    })();
+    </script>
+
+    <dl class="facts">
+      <dt>{{ _('Bestand') }}</dt><dd>{{ clip.original_name }}</dd>
+      <dt>{{ _('Bron') }}</dt><dd>{{ clip.source }}</dd>
+      <dt>{{ _('Binnengekomen') }}</dt><dd>{{ clip.ingested_at[:16] | replace('T', ' ') }}</dd>
+    </dl>
+    <p class="get"><button type="button" class="ghost" id="get-open">{{ _('Video downloaden') if clip.kind == 'video' else _('Foto downloaden') }}</button></p>
+    <dialog class="confirm" id="get" aria-labelledby="get-title">
+      <form method="dialog">
+        <h2 id="get-title">{{ _('Video downloaden') if clip.kind == 'video' else _('Foto downloaden') }}</h2>
+        <p>{{ _('Met de balk staan de camera, datum en tijd, zon of maan, het weer en de temperatuur onderin het beeld.') }}{% if clip.kind == 'video' %} {{ _('Die versie wordt nu gemaakt en duurt even.') }}{% endif %}</p>
+        <p class="get-busy" id="get-busy" role="status" hidden><span class="spinner" aria-hidden="true"></span>{{ _('Balk wordt in de video gezet…') }}</p>
+        <div class="confirm-actions">
+          <a class="btn ghost" href="/clip/{{ clip.id }}/download" download data-get>{{ _('Zonder balk') }}</a>
+          <a class="btn" href="/clip/{{ clip.id }}/download?balk=1" download data-get{{ ' data-slow' if clip.kind == 'video' }}>{{ _('Met balk') }}</a>
+        </div>
+      </form>
+    </dialog>
+    <script>
+    (() => {
+      const dlg = document.getElementById('get');
+      document.getElementById('get-open').addEventListener('click', () => dlg.showModal());
+      dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
+      // The browser shows the download itself; we only say that a banner copy takes a moment.
+      dlg.querySelectorAll('[data-get]').forEach((a) => a.addEventListener('click', () => {
+        if (!a.hasAttribute('data-slow')) { setTimeout(() => dlg.close(), 300); return; }
+        document.getElementById('get-busy').hidden = false;
+        setTimeout(() => { dlg.close(); document.getElementById('get-busy').hidden = true; }, 6000);
+      }));
+    })();
+    </script>
+    <form method="post" action="/clip/{{ clip.id }}/verwijder" class="remove" data-confirm="{{ _('Clip verwijderen?') }}" data-confirm-body="{{ _('Het origineel en de stills gaan weg. Dit kan niet ongedaan worden.') }}" data-confirm-ok="{{ _('Verwijderen') }}" data-confirm-danger><button class="link danger">{{ _('Clip verwijderen') }}</button></form>
+  </aside>
+</section>
+
+{% if clip.status == 'pending' %}
+<script>setTimeout(() => location.reload(), 3000);</script>
+{% elif clip.kind == 'video' %}
+<template id="still-new">
+  <li class="still new">
+    <button type="button" class="seek"><span class="t"></span></button>
+    <span class="verdict"><span class="who muted">{{ _('wordt bekeken…') }}</span></span>
+    <button type="button" class="drop">{{ icon('close') }}</button>
+  </li>
+</template>
+<script>
+(() => {
+  const T = {{ {
+    'frameAt': _('Beeld op {t}'), 'placeOne': _('Plaats een beeld om het model te laten kijken.'), 'looking': _('Het model kijkt…'),
+    'failed': _('Analyse mislukt. Plaats of verwijder een beeld om het opnieuw te proberen.'), 'tooMany': _('Meer dan {max} beelden kan niet.'),
+    'goTo': _('Ga naar {t}'), 'drop': _('Beeld op {t} weghalen'), 'remove': _('Beeld weghalen'), 'add': _('Beeld toevoegen'),
+    'button': still_button[lang()], 'pause': _('Pauzeren'), 'play': _('Afspelen'), 'unmute': _('Geluid aan'), 'mute': _('Geluid uit'),
+    'timeline': _('Tijdlijn'), 'timelineEdit': _('Tijdlijn. Pijltjes verplaatsen de lijn, Enter of S voegt een still toe of haalt hem weg.'),
+  } | tojson }};
+  const fill = (s, vars) => s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m));
+  const $ = (id) => document.getElementById(id);
+  const player = $('player'), video = $('video'), deck = $('deck');
+  const form = $('stills'), strip = $('strip');
+  const hint = $('stills-hint'), panel = document.querySelector('.panel');
+  const track = $('track'), film = $('film'), pins = $('pins'), playhead = $('playhead'), played = $('played');
+  const peek = $('peek'), peekLine = $('peek-line'), peekFrame = $('peek-frame'), peekTime = $('peek-time');
+  const max = Number(form.dataset.max), clip = form.dataset.clip;
+  const restingHint = hint.textContent;
+  let sent = null, sending = false;
+  // One wide image with frames of the whole clip feeds both the filmstrip and the
+  // hover preview, so looking around on the bar never moves the player itself.
+  const frames = Number(form.dataset.filmFrames);
+  let sprite = null;
+  let editing = false, press = null;
+
+  const clock = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+  const stills = () => [...strip.querySelectorAll('.still')];
+  const plural = (n) => `${n} ${n === 1 ? 'still' : 'stills'}`;
+  const duration = () => video.duration || 0;
+  const at = (t) => `${duration() ? (t / duration()) * 100 : 0}%`;
+  const seek = (v, t) => new Promise((done) => {
+    if (Math.abs(v.currentTime - t) < 0.01 && v.readyState >= 2) return done();
+    v.addEventListener('seeked', done, { once: true });
+    v.currentTime = t;
+  });
+
+  // ---- stills
+
+  function flash(li) {
+    li.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    li.classList.remove('flash');
+    void li.offsetWidth;
+    li.classList.add('flash');
+  }
+
+  function drawPins() {
+    pins.replaceChildren(...stills().map((li) => {
+      const t = Number(li.dataset.t);
+      const pin = document.createElement('button');
+      const seen = li.querySelector('.who:not(.muted)');
+      pin.type = 'button';
+      pin.className = 'pin' + (li.classList.contains('new') ? ' new' : seen ? '' : ' empty');
+      pin.style.left = at(t);
+      pin.dataset.t = li.dataset.t;
+      pin.title = `${clock(t)} · ${[...li.querySelectorAll('.verdict')].map((v) => v.textContent.replace(/\s+/g, ' ').trim()).join(' · ')}`;
+      pin.setAttribute('aria-label', fill(T.frameAt, { t: pin.title }));
+      pin.addEventListener('click', () => { video.currentTime = t; flash(li); });
+      return pin;
+    }));
+  }
+
+  const chosen = () => stills().map((li) => li.dataset.t).join(',');
+
+  // Every change to the stills goes to the model straight away. Stills it has read
+  // before are not read again, so this costs one still's worth of work.
+  async function analyse() {
+    drawPins();
+    if (sending || !chosen()) {
+      if (!chosen()) hint.textContent = T.placeOne;
+      return;
+    }
+    sending = true;
+    form.classList.add('busy');
+    try {
+      while (chosen() && chosen() !== sent) {
+        sent = chosen();
+        hint.textContent = T.looking;
+        const body = new URLSearchParams({ times: sent });
+        const posted = await fetch(`/clip/${clip}/opnieuw`, { method: 'POST', body });
+        if (!posted.ok) throw new Error(await posted.text());
+        for (;;) {
+          await new Promise((wait) => setTimeout(wait, 600));
+          const state = await (await fetch(`/api/clips/${clip}`)).json();
+          if (state.status !== 'pending') break;
+        }
+      }
+      if (chosen()) await redraw();
+      hint.textContent = restingHint;
+    } catch (error) {
+      hint.textContent = T.failed;
+      sent = null;
+    }
+    sending = false;
+    form.classList.remove('busy');
+  }
+
+  // Take the verdict panel and the stills from a fresh copy of this page.
+  async function redraw() {
+    const page = new DOMParser().parseFromString(await (await fetch(location.href)).text(), 'text/html');
+    if (chosen() !== sent) return;
+    panel.innerHTML = page.querySelector('.panel').innerHTML;
+    strip.innerHTML = page.getElementById('strip').innerHTML;
+    document.title = page.title;
+    drawPins();
+    tick();
+  }
+
+  function snapshot() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 320;
+    canvas.height = Math.round(320 * video.videoHeight / (video.videoWidth || 1)) || 180;
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.8);
+  }
+
+  async function addStill(moment) {
+    const t = Math.round(Math.min(Math.max(moment, 0), duration()) * 100) / 100;
+    const same = stills().find((li) => Math.abs(Number(li.dataset.t) - t) < 0.2);
+    video.pause();
+    await seek(video, same ? Number(same.dataset.t) : t);
+    if (same) { flash(same); return; }
+    if (stills().length >= max) { hint.textContent = fill(T.tooMany, { max }); return; }
+    const li = $('still-new').content.firstElementChild.cloneNode(true);
+    const img = new Image();
+    img.alt = '';
+    img.src = snapshot();
+    li.dataset.t = t;
+    li.querySelector('.seek').prepend(img);
+    li.querySelector('.t').textContent = clock(t);
+    li.querySelector('.seek').title = fill(T.goTo, { t: clock(t) });
+    li.querySelector('.drop').setAttribute('aria-label', fill(T.drop, { t: clock(t) }));
+    strip.insertBefore(li, stills().find((other) => Number(other.dataset.t) > t) || null);
+    flash(li);
+    analyse();
+    tick();
+  }
+
+  strip.addEventListener('click', (event) => {
+    const li = event.target.closest('.still');
+    if (!li) return;
+    if (event.target.closest('.drop')) {
+      const next = (li.nextElementSibling || li.previousElementSibling || {}).querySelector?.('button') || track;
+      dropStill(li);
+      next.focus();
+    } else if (event.target.closest('.seek')) {
+      video.currentTime = Number(li.dataset.t);
+    }
+  });
+
+  // ---- filmstrip and hover preview
+
+  const cell = (i) => [sprite.naturalWidth / frames * i, 0, sprite.naturalWidth / frames, sprite.naturalHeight];
+  const frameAt = (t) => Math.min(frames - 1, Math.max(0, Math.floor(t / duration() * frames)));
+
+  function drawFilm() {
+    if (!sprite?.complete || !sprite.naturalWidth || !editing) return;
+    const box = track.getBoundingClientRect();
+    const scale = window.devicePixelRatio || 1;
+    film.width = Math.round(box.width * scale);
+    film.height = Math.round(box.height * scale);
+    const [, , w, h] = cell(0);
+    const width = film.height * w / h;
+    const count = Math.ceil(film.width / width);
+    const ctx = film.getContext('2d');
+    for (let i = 0; i < count; i++) {
+      ctx.drawImage(sprite, ...cell(frameAt((i + 0.5) / count * duration())), i * width, 0, width, film.height);
+    }
+    film.classList.add('ready');
+  }
+
+  function loadSprite() {
+    if (sprite) return;
+    sprite = new Image();
+    sprite.addEventListener('load', () => {
+      peekFrame.height = Math.round(peekFrame.width * sprite.naturalHeight / (sprite.naturalWidth / frames));
+      drawFilm();
+    });
+    sprite.src = form.dataset.film;
+  }
+
+  function preview(t) {
+    loadSprite();
+    if (!sprite.complete || !sprite.naturalWidth) return;
+    peekFrame.getContext('2d').drawImage(sprite, ...cell(frameAt(t)), 0, 0, peekFrame.width, peekFrame.height);
+  }
+
+  // ---- the one time bar: click or drag moves the line; the still button turns that moment into a still
+
+  const timeAt = (event) => {
+    const box = track.getBoundingClientRect();
+    return Math.min(Math.max((event.clientX - box.left) / box.width, 0), 1) * duration();
+  };
+
+  function showPeek(event) {
+    const t = timeAt(event);
+    const box = track.getBoundingClientRect();
+    const half = peek.offsetWidth / 2 || 100;
+    peek.hidden = peekLine.hidden = false;
+    peekLine.style.left = at(t);
+    peek.style.left = `${Math.min(Math.max(event.clientX - box.left, half), box.width - half)}px`;
+    peekTime.textContent = clock(t);
+    preview(t);
+  }
+  const hidePeek = () => { peek.hidden = peekLine.hidden = true; };
+
+  track.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || !duration()) return;
+    track.setPointerCapture(event.pointerId);
+    press = { x: event.clientX, dragged: false, wasPlaying: !video.paused };
+    video.currentTime = timeAt(event);
+    tick();
+  });
+  track.addEventListener('pointermove', (event) => {
+    if (press) {
+      if (!press.dragged && Math.abs(event.clientX - press.x) < 4) return;
+      press.dragged = true;
+      hidePeek();
+      video.pause();
+      video.currentTime = timeAt(event);
+      tick();
+    } else if (event.pointerType === 'mouse' && duration()) {
+      showPeek(event);
+    }
+  });
+  track.addEventListener('pointerup', (event) => {
+    if (!press) return;
+    const { dragged, wasPlaying } = press;
+    press = null;
+    if (wasPlaying && dragged) video.play();
+  });
+  track.addEventListener('pointercancel', () => { press = null; });
+  track.addEventListener('pointerleave', hidePeek);
+  track.addEventListener('keydown', (event) => {
+    const step = event.shiftKey ? 5 : 0.5;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      video.currentTime = Math.min(Math.max(video.currentTime + (event.key === 'ArrowLeft' ? -step : step), 0), duration());
+    } else if (event.key === 'Enter' && editing) {
+      toggleStill();
+    } else if (event.key === ' ') {
+      toggle();
+    } else return;
+    event.preventDefault();
+  });
+
+  // The still the line is standing on, if any.
+  const under = () => stills().find((li) => Math.abs(Number(li.dataset.t) - video.currentTime) < 0.2);
+
+  function toggleStill() {
+    const li = under();
+    if (li) dropStill(li); else addStill(video.currentTime);
+  }
+
+  function dropStill(li) {
+    li.remove();
+    analyse();
+    tick();
+  }
+
+  function tick() {
+    const t = video.currentTime;
+    const here = under();
+    stills().forEach((li) => li.classList.toggle('here', li === here));
+    [...pins.children].forEach((pin) => pin.classList.toggle('here', !!here && pin.dataset.t === here.dataset.t));
+    $('still-add').classList.toggle('taken', !!here);
+    const words = T.button[here ? 'remove' : 'add'];
+    $('still-add-a').textContent = words[0];
+    $('still-add-text').textContent = words[1];
+    $('still-add').setAttribute('aria-label', here ? T.remove : T.add);
+    $('still-count').textContent = stills().length;
+    $('clock-now').textContent = clock(t);
+    playhead.style.left = played.style.width = at(t);
+    track.setAttribute('aria-valuenow', t.toFixed(1));
+    track.setAttribute('aria-valuetext', clock(t));
+  }
+  function run_clock() { tick(); if (!video.paused && !video.ended) requestAnimationFrame(run_clock); }
+
+  // ---- transport
+
+  const toggle = () => (video.paused ? video.play() : video.pause());
+  $('play').addEventListener('click', toggle);
+  video.addEventListener('click', toggle);
+  video.addEventListener('play', () => { player.classList.add('playing'); $('play').setAttribute('aria-label', T.pause); run_clock(); });
+  video.addEventListener('pause', () => { player.classList.remove('playing'); $('play').setAttribute('aria-label', T.play); });
+  video.addEventListener('seeked', tick);
+  video.addEventListener('timeupdate', tick);
+
+  $('mute').addEventListener('click', () => {
+    video.muted = !video.muted;
+    player.classList.toggle('muted', video.muted);
+    $('mute').setAttribute('aria-label', video.muted ? T.unmute : T.mute);
+  });
+  // Full screen keeps our own bar on the picture. Where a page element cannot go full screen
+  // (iPhone), the player fills the window instead of handing over to the native player.
+  $('full').addEventListener('click', () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else if (player.classList.contains('faux-full')) player.classList.remove('faux-full');
+    else if (document.fullscreenEnabled && player.requestFullscreen) {
+      // Some browsers (iPhone Safari) offer the call but refuse it for anything but a video.
+      player.requestFullscreen().catch(() => player.classList.add('faux-full'));
+    } else player.classList.add('faux-full');
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') player.classList.remove('faux-full'); });
+  // The picture box takes the video's own shape, so the bar sits on the picture, not on the black.
+  video.addEventListener('loadedmetadata', () => {
+    if (video.videoWidth && video.videoHeight) player.style.setProperty('--ar', video.videoWidth / video.videoHeight);
+  });
+
+  function setEditing(on) {
+    editing = on;
+    player.classList.toggle('editing', on);
+    form.hidden = !on;
+    $('edit').setAttribute('aria-expanded', on);
+    $('still-add').hidden = !on;
+    track.setAttribute('aria-label', on ? T.timelineEdit : T.timeline);
+    try { localStorage.setItem('wildcam-stills', on ? 'open' : ''); } catch {}
+    // Draw once the bar has grown to its full height, or the frames come out squeezed.
+    if (on) { loadSprite(); film.classList.remove('ready'); setTimeout(drawFilm, 320); }
+  }
+  $('edit').addEventListener('click', () => setEditing(!editing));
+  $('still-add').addEventListener('click', toggleStill);
+  document.addEventListener('keydown', (event) => {
+    if (!editing || event.key.toLowerCase() !== 's' || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.target.closest('input, textarea, select')) return;
+    event.preventDefault();
+    toggleStill();
+  });
+  let resized;
+  window.addEventListener('resize', () => { clearTimeout(resized); resized = setTimeout(drawFilm, 200); });
+
+  function ready() {
+    video.controls = false;
+    deck.hidden = false;
+    track.setAttribute('aria-valuemax', duration().toFixed(1));
+    $('clock-end').textContent = clock(duration());
+    tick();
+    drawPins();
+    sent = chosen();
+    let open = false;
+    try { open = localStorage.getItem('wildcam-stills') === 'open'; } catch {}
+    setEditing(open);
+  }
+  if (video.readyState >= 1) ready(); else video.addEventListener('loadedmetadata', ready, { once: true });
+
+})();
+</script>
+{% endif %}
+{% endblock %}

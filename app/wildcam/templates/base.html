@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="{{ lang() }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f2f3f2" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0e100f" media="(prefers-color-scheme: dark)">
+  <title>{% block title %}{{ app_name }} - {{ _(app_tagline) }}{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="/static/robin.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/robin.svg">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/" title="{{ _(app_tagline) }}"><img src="/static/robin.svg" alt="" width="26" height="26">{{ app_name }}</a>
+    <nav class="tabs" aria-label="{{ _('Hoofdmenu') }}">
+      <a href="/" class="{{ 'on' if request.url.path == '/' or request.url.path.startswith('/clip') }}" {{ 'aria-current=page' if request.url.path == '/' }}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>{{ _('Tijdlijn') }}</a>
+      <a href="/statistiek" class="{{ 'on' if request.url.path.startswith('/statistiek') }}" {{ 'aria-current=page' if request.url.path.startswith('/statistiek') }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V11M12 20V4M19 20v-6"/></svg>{{ _('Statistiek') }}</a>
+      <a href="/instellingen" class="{{ 'on' if request.url.path.startswith('/instellingen') }}" {{ 'aria-current=page' if request.url.path.startswith('/instellingen') }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>{{ _('Instellingen') }}</a>
+    </nav>
+    {% set cams = camera_views() %}
+    <div class="top-end">
+      {% if status is defined and (status.get('pending') or status.get('failed')) %}
+      <div class="queue">
+        {% if status.get('pending') %}<span class="pill busy">{{ _('{n} in wachtrij', n=status.pending) }}</span>{% endif %}
+        {% if status.get('failed') %}<span class="pill err">{{ _('{n} mislukt', n=status.failed) }}</span>{% endif %}
+      </div>
+      {% endif %}
+      {% if cams %}
+      {% set sum = camera_summary(cams) %}
+      <button type="button" class="cams-btn {{ sum.tone }}{{ ' spin' if sum.busy }}" id="cams-open" aria-haspopup="dialog" aria-controls="cams-panel" title="{{ sum.title }}" aria-label="{{ sum.title }}">
+        <span class="dot" aria-hidden="true"></span><span data-cams-label>{{ sum.label }}</span>
+      </button>
+      {% else %}
+      <a class="cams-btn add" href="/instellingen#nieuwe-camera">{% if lang() == 'en' %}+ <span class="long">Add&nbsp;</span>camera{% else %}+ Camera<span class="long">&nbsp;toevoegen</span>{% endif %}</a>
+      {% endif %}
+    </div>
+  </header>
+  {% for label, problem in model_problems() %}
+  <div class="alert" role="alert">
+    <strong>{{ _('{name} werkt niet:', name=label) }}</strong> {{ problem }}.
+    <form method="post" action="/instellingen/opnieuw"><input type="hidden" name="wat" value="mislukt"><button class="link">{{ _('Opnieuw proberen') }}</button></form>
+    {% if not request.url.path.startswith('/instellingen') %}<a href="/instellingen">{{ _('Naar instellingen') }}</a>{% endif %}
+  </div>
+  {% endfor %}
+  <main>{% block content %}{% endblock %}</main>
+  {% if cams %}
+  <dialog class="drawer" id="cams-panel" aria-labelledby="cams-panel-title">
+    <div class="drawer-head">
+      <h2 id="cams-panel-title">{{ _("Camera's") }}</h2>
+      <button type="button" class="ghost close" id="cams-close" aria-label="{{ _('Sluiten') }}">{{ _('Sluiten') }}</button>
+    </div>
+    {% for cam in cams %}
+    <section class="cam-card {{ cam.tone }}" aria-label="{{ cam.name }}">
+      <div class="cam-title">
+        <span class="dot" aria-hidden="true"></span>
+        <h3>{{ cam.name }}</h3>
+        <span class="state">{{ cam.state }}</span>
+      </div>
+      {% if cam.model or cam.ble %}<p class="sub" title="{{ cam.mac }}">{{ cam.model }}{% if cam.model and cam.ble %} &middot; {% endif %}{{ cam.ble }}</p>{% endif %}
+      <dl class="cam-facts">
+        <div><dt>{{ _('Signaal') }}</dt><dd>{% if cam.rssi is not none %}{{ cam.rssi }} dBm, {{ cam.signal }}{% else %}&ndash;{% endif %}</dd></div>
+        <div><dt>{{ _('Batterij') }}</dt><dd>{% if cam.battery is not none %}{{ cam.battery }}%{% if cam.solar %}, {{ _('zon laadt') }}{% elif cam.charging %}, {{ _('laadt') }}{% endif %}{% else %}&ndash;{% endif %}</dd></div>
+        <div><dt>{{ _('Temperatuur') }}</dt><dd>{% if cam.temperature is not none %}{{ cam.temperature }}&nbsp;&deg;C{% else %}&ndash;{% endif %}</dd></div>
+        <div><dt>{{ _('SD vrij') }}</dt><dd>{% if cam.sd_free is not none %}{{ _('{free} van {total}', free=cam.sd_free, total=cam.sd_total) }}&nbsp;MB{% else %}&ndash;{% endif %}</dd></div>
+        <div class="wide"><dt>{{ _('Laatste check') }}</dt><dd>{% if cam.last_check %}{{ cam.last_check | day }} {{ cam.last_check | time }}{% if cam.result %}, {{ cam.result }}{% endif %}{% else %}{{ _('nog niet') }}{% endif %}</dd></div>
+        <div class="wide"><dt>{{ _('Volgende check') }}</dt><dd>{% if cam.next_run %}{{ cam.next_run | day }} {{ cam.next_run | time }}{% else %}{{ _('geen controle-uren') }}{% endif %}</dd></div>
+      </dl>
+      <div class="cam-progress" data-progress {{ 'hidden' if not cam.progress }} role="status" aria-live="polite">
+        <div class="cam-progress-line"><span class="spinner" aria-hidden="true"></span><span data-progress-text>{{ cam.progress.text if cam.progress else '' }}</span></div>
+        <div class="bar" aria-hidden="true"><span data-progress-bar style="width: {{ ((cam.progress.value or 0) * 100) | round if cam.progress else 0 }}%"></span></div>
+      </div>
+      <form method="post" action="/camera/{{ cam.id }}/nu" data-check="{{ cam.id }}"><button {{ 'disabled' if cam.tone == 'busy' }}>{{ _('Bezig met ophalen') if cam.tone == 'busy' else _('Nu controleren') }}</button></form>
+    </section>
+    {% endfor %}
+    <p class="drawer-foot"><a href="/instellingen#cameras">{{ _("Camera's beheren") }}</a></p>
+  </dialog>
+  <script>
+  (() => {
+    const T = {{ {
+      'fetched': _('{n} binnen'), 'failed': _('Mislukt: {reason}'), 'noAnswer': _('Mislukt. De bridge geeft geen antwoord.'),
+      'retry': _('Opnieuw proberen'), 'done': _('Klaar. Nieuwe clips worden geanalyseerd.'), 'busy': _('Bezig met ophalen'),
+      'waking': _('Camera wekken'), 'unreachable': _('De bridge antwoordt niet. Probeer het later opnieuw.'), 'check': _('Nu controleren'),
+    } | tojson }};
+    const panel = document.getElementById('cams-panel');
+    const camsBtn = document.getElementById('cams-open');
+    camsBtn.addEventListener('click', () => panel.showModal());
+
+    // The button keeps up on its own: spinning while a camera is being fetched, red when one fails.
+    let pollTimer = null;
+    async function pollCameras() {
+      clearTimeout(pollTimer);
+      let busy = false;
+      if (!document.hidden) {
+        try {
+          const { summary: s } = await (await fetch('/api/cameras')).json();
+          camsBtn.className = `cams-btn ${s.tone}${s.busy ? ' spin' : ''}`;
+          camsBtn.title = s.title;
+          camsBtn.setAttribute('aria-label', s.title);
+          busy = s.busy;
+        } catch { /* offline for a moment: keep what we show */ }
+      }
+      pollTimer = setTimeout(pollCameras, busy ? 5000 : 30000);
+    }
+    pollTimer = setTimeout(pollCameras, camsBtn.classList.contains('spin') ? 5000 : 30000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) pollCameras(); });
+    document.getElementById('cams-close').addEventListener('click', () => panel.close());
+    // A click on the dimmed page next to the panel closes it.
+    panel.addEventListener('click', (e) => { if (e.target === panel) panel.close(); });
+    if (location.hash === '#cameras-open') { history.replaceState(null, '', location.pathname + location.search); panel.showModal(); }
+
+    // Check now: stay in the panel and follow the session until the bridge is done.
+    panel.querySelectorAll('form[data-check]').forEach((form) => {
+      const card = form.closest('.cam-card');
+      const box = card.querySelector('[data-progress]');
+      const text = card.querySelector('[data-progress-text]');
+      const bar = card.querySelector('[data-progress-bar]');
+      const button = form.querySelector('button');
+      let seenBusy = false;
+
+      function show(cam) {
+        const p = cam.progress;
+        if (p) {
+          seenBusy = true;
+          box.hidden = false;
+          text.textContent = p.text + (p.fetched ? ` (${T.fetched.replace('{n}', p.fetched)})` : '');
+          bar.style.width = `${Math.round((p.value || 0.02) * 100)}%`;
+          bar.parentElement.classList.toggle('indeterminate', p.value == null);
+          card.querySelector('.state').textContent = cam.state;
+          return false;
+        }
+        return seenBusy;  // was busy, now idle: done
+      }
+
+      async function follow(id) {
+        let last = null;
+        for (let i = 0; i < 600; i++) {
+          await new Promise((r) => setTimeout(r, 2000));
+          let cam;
+          try { cam = await (await fetch(`/api/cameras/${id}`)).json(); } catch { continue; }
+          last = cam;
+          if (show(cam)) break;
+          if (!seenBusy && i > 10) break;  // never started (bridge unreachable or refused)
+        }
+        if (last && last.tone === 'bad') {
+          card.className = 'cam-card bad';
+          card.querySelector('.state').textContent = last.state;
+          box.querySelector('.spinner').hidden = true;
+          text.textContent = last.result ? T.failed.replace('{reason}', last.result) : T.noAnswer;
+          bar.parentElement.hidden = true;
+          button.disabled = false;
+          button.textContent = T.retry;
+          pollCameras();
+          return;
+        }
+        text.textContent = T.done;
+        bar.style.width = '100%';
+        bar.parentElement.classList.remove('indeterminate');
+        setTimeout(() => { location.href = location.pathname + location.search + '#cameras-open'; location.reload(); }, 2500);
+      }
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        camsBtn.classList.add('spin');
+        card.className = 'cam-card busy';
+        box.querySelector('.spinner').hidden = false;
+        bar.parentElement.hidden = false;
+        button.disabled = true;
+        button.textContent = T.busy;
+        box.hidden = false;
+        text.textContent = T.waking;
+        bar.style.width = '2%';
+        try {
+          const r = await fetch(form.action, { method: 'POST', headers: { Accept: 'application/json' } });
+          const data = await r.json();
+          if (data.camera) show(data.camera);
+          pollCameras();
+        } catch {
+          text.textContent = T.unreachable;
+          button.disabled = false;
+          button.textContent = T.check;
+          return;
+        }
+        follow(form.dataset.check);
+      });
+
+      if (!box.hidden) follow(form.dataset.check);  // a session was already running
+    });
+  })();
+  </script>
+  {% endif %}
+  <dialog class="confirm" id="confirm" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+    <form method="dialog">
+      <h2 id="confirm-title"></h2>
+      <p id="confirm-body"></p>
+      <div class="confirm-actions">
+        <button value="cancel" class="ghost">{{ _('Annuleren') }}</button>
+        <button value="ok" id="confirm-ok" autofocus></button>
+      </div>
+    </form>
+  </dialog>
+  <script>
+  // Forms with data-confirm ask first, in our own dialog instead of the browser's.
+  (() => {
+    const dlg = document.getElementById('confirm');
+    const ok = document.getElementById('confirm-ok');
+    let pending = null;
+    document.addEventListener('submit', (e) => {
+      const form = e.target;
+      if (!form.dataset.confirm || form.dataset.confirmed) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      pending = form;
+      document.getElementById('confirm-title').textContent = form.dataset.confirm;
+      document.getElementById('confirm-body').textContent = form.dataset.confirmBody || '';
+      ok.textContent = form.dataset.confirmOk || {{ _('Doorgaan') | tojson }};
+      ok.classList.toggle('danger', 'confirmDanger' in form.dataset);
+      dlg.showModal();
+    }, true);
+    dlg.addEventListener('close', () => {
+      if (dlg.returnValue === 'ok' && pending) {
+        pending.dataset.confirmed = '1';
+        pending.requestSubmit();
+      }
+      pending = null;
+    });
+    dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close('cancel'); });
+  })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+# k3s ships Traefik as the default ingress controller (no upload size limit by default).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: wildcam
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+spec:
+  rules:
+    - host: wildcam.example.lan   # TODO: your hostname
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: wildcam, port: {name: http}}

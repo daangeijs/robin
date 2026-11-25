@@ -1,0 +1,28 @@
+[project]
+name = "wildcam"
+version = "0.1.0"
+description = "Trail camera dashboard with species identification (SpeciesNet)"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "jinja2>=3.1",
+  "python-multipart>=0.0.9",
+  "pillow>=10",
+  "anthropic>=2.13",
+]
+
+[project.optional-dependencies]
+speciesnet = ["speciesnet>=5.0"]
+deepfaune = ["timm>=1.0", "ultralytics>=8.3", "dill>=0.3"]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["wildcam*"]
+
+[tool.setuptools.package-data]
+wildcam = ["templates/*.html", "static/*"]

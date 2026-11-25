@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wildcam
+  labels: {app: wildcam}
+spec:
+  replicas: 1          # SQLite + one worker: keep it at 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {app: wildcam}
+  template:
+    metadata:
+      labels: {app: wildcam}
+    spec:
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: wildcam
+          image: wildcam
+          ports:
+            - {name: http, containerPort: 8000}
+          envFrom:
+            - configMapRef: {name: wildcam-config}
+            - secretRef: {name: wildcam-secrets}
+          env:
+            - {name: TZ, value: Europe/Amsterdam}
+            # Uncomment to keep originals on the NAS (see the nas-media volume below).
+            # - {name: WILDCAM_MEDIA_DIR, value: /nas/wildcam/media}
+            # - {name: WILDCAM_INBOX_DIR, value: /nas/wildcam/inbox}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: models, mountPath: /models}
+            # - {name: nas-media, mountPath: /nas/wildcam}
+          resources:
+            requests: {cpu: 250m, memory: 1Gi}
+            limits: {memory: 4Gi}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 30
+            periodSeconds: 60
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: wildcam-data}
+        - name: models
+          persistentVolumeClaim: {claimName: wildcam-models}
+        # - name: nas-media
+        #   nfs:
+        #     server: nas.local        # TODO
+        #     path: /volume1/wildcam   # TODO

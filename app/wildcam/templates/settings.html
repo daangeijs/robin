@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Instellingen') }} - {{ app_name }}{% endblock %}
+{% block content %}
+<form method="post" action="/instellingen" class="settings" id="settings">
+  <h1>{{ _('Modellen') }}</h1>
+  <p class="lead">{{ _('Elk model dat aan staat bekijkt elke still en stemt mee over de soort. Zijn ze het oneens, dan telt de stem van een model met meer gewicht zwaarder.') }}</p>
+
+  {% if error %}
+  <p class="notice bad" role="alert">{{ error }}</p>
+  {% endif %}
+  {% if saved %}
+  <p class="notice" role="status">{{ _('Bewaard.') }} {% if status.get('pending') %}{{ ngettext('{n} clip wordt opnieuw beoordeeld; stills die een model al gelezen heeft, leest het niet nog eens.', '{n} clips worden opnieuw beoordeeld; stills die een model al gelezen heeft, leest het niet nog eens.', status.pending) }}{% else %}{{ _('Alle clips zijn beoordeeld met deze keuze.') }}{% endif %}</p>
+  {% endif %}
+
+  <ul class="models">
+    {% for m in models %}
+    <li class="model {{ 'off' if not m.on }}" data-model="{{ m.name }}">
+      <label class="switch">
+        <input type="checkbox" name="on-{{ m.name }}" {{ 'checked' if m.on }} aria-label="{{ _('{name} gebruiken', name=m.label) }}">
+        <span></span>
+      </label>
+      <div class="about">
+        <h2>{{ m.label }} <span>{{ m.maker }}</span></h2>
+        <p>{{ _(m.about) }}</p>
+      </div>
+      <div class="weight">
+        <label for="weight-{{ m.name }}">{{ _('Gewicht') }}</label>
+        <input type="range" id="weight-{{ m.name }}" name="weight-{{ m.name }}" min="5" max="100" step="5" value="{{ m.weight }}">
+        <output for="weight-{{ m.name }}">{{ m.weight }}</output>
+      </div>
+      {% if m.needs_key %}
+      <div class="key">
+        <label for="anthropic-key">{{ _('API-sleutel of abonnementstoken') }}</label>
+        <input type="password" id="anthropic-key" name="anthropic-key" autocomplete="off" spellcheck="false"
+               data-saved="{{ '1' if key_hint }}" placeholder="{{ _('Bewaard: {hint}', hint=key_hint) if key_hint else 'sk-ant-…' }}">
+        {% if key_hint %}
+        <label class="check"><input type="checkbox" name="anthropic-key-weg"> {{ _('Sleutel wissen') }}</label>
+
+        {% else %}
+        <p class="sub">{{ _('Een API-sleutel van console.anthropic.com, of een token van je Claude-abonnement ({cmd}). Zonder kan dit model niet aan.', cmd='<code>claude setup-token</code>' | safe) }}</p>
+        {% endif %}
+      </div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+
+  <div class="shares" aria-live="polite">
+    <div class="bar" id="share-bar"></div>
+    <p class="sub" id="share-text"></p>
+  </div>
+
+  <div class="save">
+    <button id="save">{{ _('Opslaan') }}</button>
+    <p class="sub">{{ _('Na opslaan worden alle clips opnieuw beoordeeld.') }}</p>
+  </div>
+</form>
+
+<section class="cams" id="cameras" aria-labelledby="cams-title">
+  <h2 id="cams-title">{{ _("Camera's") }}</h2>
+  <p class="sub">{{ _('Een wildcamera achter een bridge (de ESP32 met de Pi). {app} wekt hem op de controle-uren, haalt nieuwe clips op en wist ze daarna op de camera.', app=app_name) }}</p>
+  {% if camera_changed %}<p class="notice" role="status">{{ _('Camera bewaard.') }}</p>{% endif %}
+  {% if camera_saved %}<p class="notice" role="status">{{ _('Camera toegevoegd. De eerste controle is op het volgende controle-uur, of druk op de tijdlijn op Nu controleren.') }}</p>{% endif %}
+  {% if cameras %}
+  <ul class="cam-list">
+    {% for cam in cameras %}
+    <li class="cam-row {{ cam.tone }}">
+      <span class="dot" aria-hidden="true"></span>
+      <div>
+        <h3>{{ cam.name }} <span>{{ cam.url }}</span></h3>
+        <p class="sub">{{ cam.state }}{% if cam.last_check %} &middot; {{ _('laatste check {when}', when=(cam.last_check | day_inline) ~ ' ' ~ (cam.last_check | time)) }}{% if cam.result %}, {{ cam.result }}{% endif %}{% endif %} &middot; {% if cam.hours %}{{ _('controle om {hours} uur', hours=cam.hours | join(', ')) }}{% else %}{{ _('geen controle-uren') }}{% endif %}</p>
+      </div>
+      <form method="post" action="/instellingen/camera/{{ cam.id }}/verwijder" data-confirm="{{ _('{name} verwijderen?', name=cam.name) }}" data-confirm-body="{{ _('{app} controleert deze camera dan niet meer. Clips die al binnen zijn blijven staan.', app=app_name) }}" data-confirm-ok="{{ _('Verwijderen') }}" data-confirm-danger><button class="link danger">{{ _('Verwijderen') }}</button></form>
+      <details class="cam-edit"{{ ' open' if camera_edit == cam.id }}>
+        <summary>{{ _('Bewerken') }}</summary>
+        <form method="post" action="/instellingen/camera/{{ cam.id }}#cameras">
+          {% if camera_edit == cam.id and camera_error %}<p class="notice bad" role="alert">{{ camera_error }}</p>{% endif %}
+          <label>{{ _('Naam') }} <input name="name" value="{{ cam.name }}" required autocomplete="off"></label>
+          <label>{{ _('Adres van de bridge') }} <input name="url" value="{{ cam.url }}" required inputmode="url" autocomplete="off" spellcheck="false"></label>
+          <label>{{ _('Token') }} <span class="opt">({{ _('bewaard; leeg laten om te houden') if cam.token_set else _('als de bridge er een heeft') }})</span><input name="token" type="password" autocomplete="off"></label>
+          <label>{{ _('Controle-uren') }} <input name="hours" value="{{ cam.hours | join(',') }}" inputmode="numeric" autocomplete="off" spellcheck="false"></label>
+          {% if cam.date_stamp is not none %}
+          <input type="hidden" name="stempel_was" value="{{ 1 if cam.date_stamp else 0 }}">
+          <label class="check"><input type="checkbox" name="stempel" {{ 'checked' if cam.date_stamp }}> {{ _('Camera brandt zelf datum en logo in het beeld') }}
+            {% if cam.date_stamp_pending %}<span class="opt">({{ _('wordt bij de volgende controle ingesteld') }})</span>{% endif %}</label>
+          {% endif %}
+          <button>{{ _('Bewaren') }}</button>
+        </form>
+      </details>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  <details class="cam-new" id="nieuwe-camera"{{ ' open' if (camera_error and not camera_edit) or not cameras }}>
+    <summary>{{ _('+ Camera toevoegen') }}</summary>
+    <form method="post" action="/instellingen/camera#cameras" class="cam-add">
+      {% if camera_error and not camera_edit %}<p class="notice bad" role="alert">{{ camera_error }}</p>{% endif %}
+      <label>{{ _('Naam') }} <input name="name" value="{{ camera_form.name or '' }}" placeholder="{{ _('Tuin') }}" required autocomplete="off"></label>
+      <label>{{ _('Adres van de bridge') }} <input name="url" value="{{ camera_form.url or '' }}" placeholder="http://192.168.1.50:8090" required inputmode="url" autocomplete="off" spellcheck="false"></label>
+      <label>{{ _('Token') }} <span class="opt">({{ _('als de bridge er een heeft') }})</span><input name="token" type="password" autocomplete="off"></label>
+      <label>{{ _('Controle-uren') }} <input name="hours" value="{{ camera_form.hours or '' }}" inputmode="numeric" autocomplete="off" spellcheck="false"></label>
+      <p class="sub">{{ _("Elke controle zet de wifi van de camera kort aan en kost dus wat batterij. Daarom vooral 's nachts.") }}</p>
+      <button>{{ _('Toevoegen') }}</button>
+    </form>
+  </details>
+  <script>
+  // The top bar's "Camera toevoegen" lands here with the form open.
+  if (location.hash === '#nieuwe-camera') document.getElementById('nieuwe-camera').open = true;
+  </script>
+</section>
+
+<section class="cams" id="balk" aria-labelledby="balk-title">
+  <h2 id="balk-title">{{ _('Balk over de beelden') }}</h2>
+  <p class="sub">{{ _('Een balk onderin elke clip, zoals de camera die zelf inbrandt. Hier staat hij alleen over het beeld; bij downloaden kies je of hij erin komt. Zet de datumstempel op de camera zelf uit, dan heb je alleen deze.') }}</p>
+  {% if banner_saved %}<p class="notice" role="status">{{ _('Balk bewaard.') }}</p>{% endif %}
+  {% set b = banner() %}
+  <form method="post" action="/instellingen/balk" class="cam-add banner-form">
+    <div class="checks">
+      {% for key, label in banner_parts.items() %}
+      <label class="check"><input type="checkbox" name="{{ key }}" {{ 'checked' if b[key] }}> {{ _(label) }}</label>
+      {% endfor %}
+    </div>
+    {% if banner_error %}<p class="notice bad" role="alert">{{ banner_error }}</p>{% endif %}
+    <label>{{ _('Locatie van de camera') }} <span class="opt">({{ _('breedtegraad, lengtegraad; voor weer, zon en temperatuur') }})</span>
+      <input name="locatie" value="{{ '%.4f, %.4f' % location if location else '' }}" placeholder="52.0, 5.8" inputmode="decimal" autocomplete="off" spellcheck="false"></label>
+    <p class="sub">{{ _('Met een locatie haalt {app} per clip het weer van dat uur op bij Open-Meteo (gratis, zonder account): weertype, dag of nacht en de luchttemperatuur. Alleen de locatie en de datum gaan daarheen. Zonder locatie toont de balk de temperatuur van de camera bij de controle.', app=app_name) }}</p>
+    <button>{{ _('Bewaren') }}</button>
+  </form>
+</section>
+
+<section class="redo" aria-labelledby="redo-title">
+  <h2 id="redo-title">{{ _('Opnieuw beoordelen') }}</h2>
+  {% if redone is not none %}
+  <p class="notice" role="status">{{ ngettext('{n} clip gaat terug in de wachtrij.', '{n} clips gaan terug in de wachtrij.', redone) }}</p>
+  {% endif %}
+  <div class="redo-row">
+    <div>
+      <h3>{{ _('Mislukte lezingen') }}</h3>
+      <p class="sub">{% if failed_clips %}{{ ngettext('Bij {n} clip kon een model een still niet lezen, bijvoorbeeld door een limiet. Dit gebeurt ook vanzelf elk uur.', 'Bij {n} clips kon een model een still niet lezen, bijvoorbeeld door een limiet. Dit gebeurt ook vanzelf elk uur.', failed_clips) }}{% else %}{{ _('Geen mislukte lezingen.') }}{% endif %}</p>
+    </div>
+    <form method="post" action="/instellingen/opnieuw"><input type="hidden" name="wat" value="mislukt"><button class="ghost" {{ 'disabled' if not failed_clips }}>{{ _('Opnieuw proberen') }}</button></form>
+  </div>
+  <div class="redo-row">
+    <div>
+      <h3>{{ _('Alles') }}</h3>
+      <p class="sub">{{ _('Elk model leest elke still opnieuw en je beoordelingen van het model vervallen. Met Claude aan kost dit flink van je limiet.') }}</p>
+    </div>
+    <form method="post" action="/instellingen/opnieuw" data-confirm="{{ _('Alle clips opnieuw beoordelen?') }}" data-confirm-body="{{ _('Elk model leest elke still opnieuw en je beoordelingen van het model vervallen. Met Claude aan kost dit flink van je limiet.') }}" data-confirm-ok="{{ _('Alles opnieuw') }}"><input type="hidden" name="wat" value="alles"><button class="ghost">{{ _('Alles opnieuw') }}</button></form>
+  </div>
+</section>
+
+<section class="lang" id="taal" aria-labelledby="lang-title">
+  <h2 id="lang-title">{{ _('Taal') }}</h2>
+  <div class="segmented" role="group" aria-labelledby="lang-title">
+    <a href="/taal/nl?terug=/instellingen%23taal" hreflang="nl" lang="nl"{{ ' aria-current=true class=on' if lang() == 'nl' }}>Nederlands</a>
+    <a href="/taal/en?terug=/instellingen%23taal" hreflang="en" lang="en"{{ ' aria-current=true class=on' if lang() == 'en' }}>English</a>
+  </div>
+</section>
+
+<script>
+(() => {
+  const T = {{ {'none': _('Zet minstens één model aan.'), 'only': _('Alleen {name} bepaalt het oordeel.'), 'shares': _('Stemverhouding: {shares}.')} | tojson }};
+  const rows = [...document.querySelectorAll('.model')];
+  const bar = document.getElementById('share-bar'), text = document.getElementById('share-text');
+  const save = document.getElementById('save');
+
+  function draw() {
+    // A model that needs a key can only be switched on once there is one.
+    rows.forEach((row) => {
+      const key = row.querySelector('.key input[type=password]');
+      if (!key) return;
+      const wipe = row.querySelector('[name=anthropic-key-weg]');
+      const usable = key.value.trim() !== '' || (key.dataset.saved === '1' && !(wipe && wipe.checked));
+      const toggle = row.querySelector('.switch input');
+      toggle.disabled = !usable;
+      if (!usable) toggle.checked = false;
+    });
+    const on = rows.filter((row) => row.querySelector('.switch input').checked);
+    const total = on.reduce((sum, row) => sum + Number(row.querySelector('[type=range]').value), 0);
+    rows.forEach((row) => {
+      const active = on.includes(row);
+      row.classList.toggle('off', !active);
+      row.querySelector('[type=range]').disabled = !active;
+      row.querySelector('output').textContent = row.querySelector('[type=range]').value;
+    });
+    const shares = on.map((row) => [row.querySelector('h2').firstChild.textContent.trim(), Number(row.querySelector('[type=range]').value) / total]);
+    bar.replaceChildren(...shares.map(([, share], i) => {
+      const part = document.createElement('span');
+      part.style.flexGrow = share;
+      part.className = `part p${i}`;
+      return part;
+    }));
+    save.disabled = on.length === 0;
+    if (on.length === 0) text.textContent = T.none;
+    else if (on.length === 1) text.textContent = T.only.replace('{name}', shares[0][0]);
+    else text.textContent = T.shares.replace('{shares}', shares.map(([name, share]) => `${name} ${Math.round(share * 100)}%`).join(', '));
+  }
+  document.getElementById('settings').addEventListener('input', draw);
+  draw();
+})();
+</script>
+{% endblock %}

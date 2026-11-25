@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Statistiek') }} - {{ app_name }}{% endblock %}
+{% block content %}
+<section class="chips">
+  <a class="chip {{ 'on' if not soort }}" href="/statistiek">{{ _('Alle dieren') }}</a>
+  {% for label, n in labels %}
+  <a class="chip {{ 'on' if soort == label }}" href="/statistiek?soort={{ label | urlencode }}">{{ label | species }}</a>
+  {% endfor %}
+</section>
+
+<section class="stats">
+  <div class="tile wide">
+    <h3>{{ _('Wanneer actief') }}{% if soort %}: {{ soort | species }}{% endif %}</h3>
+    <div class="hours">
+      {% for n in hours %}
+      <div class="col" title="{{ '%02d' % loop.index0 }}:00, {{ n }} clips">
+        <span style="height:{{ (n / hours_max * 100) | round(1) }}%" class="{{ 'night' if loop.index0 < 6 or loop.index0 >= 20 }}"></span>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="axis"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
+  </div>
+
+  <div class="tile">
+    <h3>{{ _('Soorten') }}</h3>
+    {% set top = labels[0][1] if labels else 1 %}
+    <ul class="bars">
+      {% for label, n in labels %}
+      <li><a href="/?soort={{ label | urlencode }}">{{ label | species }}</a><span class="bar"><span style="width:{{ (n / top * 100) | round(1) }}%"></span></span><b>{{ n }}</b></li>
+      {% else %}<li class="sub">{{ _('Nog geen dieren') }}</li>{% endfor %}
+    </ul>
+  </div>
+
+  <div class="tile">
+    <h3>{{ _('Laatste 30 dagen') }}</h3>
+    <div class="days">
+      {% for d, n in daily %}
+      <div class="col" title="{{ d }}: {{ n }}"><span style="height:{{ (n / daily_max * 100) | round(1) }}%"></span></div>
+      {% else %}<p class="sub">{{ _('Nog geen data') }}</p>{% endfor %}
+    </div>
+  </div>
+</section>
+{% endblock %}

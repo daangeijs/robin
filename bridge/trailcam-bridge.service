@@ -1,0 +1,30 @@
+[Unit]
+Description=Trail camera bridge (ESP32 serial link, clip store, HTTP API)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trailcam
+Group=trailcam
+SupplementaryGroups=dialout
+EnvironmentFile=/etc/trailcam-bridge.env
+Environment=PYTHONPATH=/opt/trailcam-bridge PYTHONUNBUFFERED=1
+WorkingDirectory=/var/lib/trailcam-bridge
+# keep DTR up when the port closes (the CP2102 auto-reset would reboot the ESP); the code clears HUPCL too
+ExecStartPre=-/bin/sh -c '/usr/bin/stty -F "$TRAILCAM_SERIAL" -hupcl'
+ExecStart=/opt/trailcam-bridge/venv/bin/python -m trailcam_bridge serve
+Restart=on-failure
+RestartSec=10
+# a running session finishes (and STOPs the ESP) before exit; the ESP watchdog covers the rest
+TimeoutStopSec=180
+StateDirectory=trailcam-bridge
+Nice=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/trailcam-bridge
+
+[Install]
+WantedBy=multi-user.target

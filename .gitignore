@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+esphome/secrets.yaml
+esphome/.esphome/
+fetcher/*.env
+!fetcher/*.env.example
+*.egg-info/
+.localdata/
